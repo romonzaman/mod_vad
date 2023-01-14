@@ -37,6 +37,7 @@ SWITCH_MODULE_DEFINITION(mod_vad, mod_vad_load, mod_vad_shutdown, NULL);
 // define vad functions
 SWITCH_STANDARD_APP(vad_app_function);
 static switch_bool_t fire_vad_event(switch_core_session_t *session, switch_vad_state_t vad_state);
+static switch_bool_t fire_vad_event_another(switch_core_session_t *session, switch_vad_state_t vad_state);
 SWITCH_DECLARE(const char *) get_vad_state(switch_vad_state_t state);
 static switch_bool_t vad_audio_callback(switch_media_bug_t *bug, void *user_data, switch_abc_type_t type);
 SWITCH_STANDARD_API(vad_api_function);
@@ -212,6 +213,37 @@ static switch_bool_t fire_vad_event(switch_core_session_t *session, switch_vad_s
 	switch_event_destroy(&event);
 	return SWITCH_TRUE;
 }
+static switch_bool_t fire_vad_event_another(switch_core_session_t *session, switch_vad_state_t vad_state)
+{
+	switch_event_t *event = NULL;
+	switch_channel_t *channel = switch_core_session_get_channel(session);
+
+	switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "Fire VAD event %s\n",
+					  get_vad_state(vad_state));
+	// switch_event_create_subclass(&event, SWITCH_EVENT_CUSTOM, VAD_EVENT_SUBCLASS);
+	switch_event_create(&event, SWITCH_EVENT_DETECTED_SPEECH);
+	if (event) {
+		switch (vad_state) {
+		case SWITCH_VAD_STATE_START_TALKING:
+			switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Speech-Type", "start_talking");
+			break;
+		case SWITCH_VAD_STATE_STOP_TALKING:
+			switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Speech-Type", "stop_talking");
+			break;
+		default:
+			break;
+		}
+		switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "vender", "wavin");
+		switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "product_name", "vad");
+		switch_channel_event_set_data(channel, event);
+		switch_event_fire(&event);
+	} else {
+		switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
+						  "Failed to fire VAD Complete event %d\n", vad_state);
+	}
+	switch_event_destroy(&event);
+	return SWITCH_TRUE;
+}
 
 SWITCH_DECLARE(const char *) get_vad_state(switch_vad_state_t state)
 {
@@ -275,9 +307,11 @@ static switch_bool_t vad_audio_callback(switch_media_bug_t *bug, void *user_data
 		if (vad_state == SWITCH_VAD_STATE_START_TALKING) {
 			switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "START TALKING\n");
 			fire_vad_event(session, vad_state);
+			fire_vad_event_another(session, vad_state);
 		} else if (vad_state == SWITCH_VAD_STATE_STOP_TALKING) {
 			switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "STOP TALKING\n");
 			fire_vad_event(session, vad_state);
+			fire_vad_event_another(session, vad_state);
 			switch_vad_reset(vad->svad);
 		} else if (vad_state == SWITCH_VAD_STATE_TALKING) {
 			switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "State - TALKING\n");
